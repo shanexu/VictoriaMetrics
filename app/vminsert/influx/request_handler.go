@@ -79,7 +79,7 @@ func (ctx *pushCtx) InsertRows(at *auth.Token, db string) error {
 	for i := range rows {
 		r := &rows[i]
 		ic.Labels = ic.Labels[:0]
-		ic.AddLabel("db", db)
+		ic.AddLabel("__db__", db)
 		for j := range r.Tags {
 			tag := &r.Tags[j]
 			ic.AddLabel(tag.Key, tag.Value)
