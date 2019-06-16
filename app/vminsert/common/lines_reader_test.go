@@ -29,9 +29,6 @@ func TestReadLinesBlockFailure(t *testing.T) {
 	// empty string
 	f("")
 
-	// no newline in nonempty string
-	f("foobar")
-
 	// too long string
 	b := make([]byte, maxLineSize+1)
 	f(string(b))
@@ -82,6 +79,7 @@ func TestReadLineBlockSuccessSingleByteReader(t *testing.T) {
 	f("\nfoo", "", "")
 	f("foo\nbar", "foo", "")
 	f("foo\nbar\nbaz", "foo", "")
+	f("foo", "foo", "")
 
 	// The maximum line size
 	b := make([]byte, maxLineSize+10)

@@ -846,22 +846,18 @@ func openParts(path string) ([]*partWrapper, error) {
 	}
 
 	txnDir := path + "/txn"
-	if err := os.RemoveAll(txnDir); err != nil {
-		return nil, fmt.Errorf("cannot remove %q: %s", txnDir, err)
-	}
+	fs.MustRemoveAll(txnDir)
 	if err := fs.MkdirAllFailIfExist(txnDir); err != nil {
 		return nil, fmt.Errorf("cannot create %q: %s", txnDir, err)
 	}
 
 	tmpDir := path + "/tmp"
-	if err := os.RemoveAll(tmpDir); err != nil {
-		return nil, fmt.Errorf("cannot remove %q: %s", tmpDir, err)
-	}
+	fs.MustRemoveAll(tmpDir)
 	if err := fs.MkdirAllFailIfExist(tmpDir); err != nil {
 		return nil, fmt.Errorf("cannot create %q: %s", tmpDir, err)
 	}
 
-	fs.SyncPath(path)
+	fs.MustSyncPath(path)
 
 	// Open parts.
 	fis, err := d.Readdir(-1)
@@ -965,9 +961,9 @@ func (tb *Table) CreateSnapshotAt(dstDir string) error {
 		}
 	}
 
-	fs.SyncPath(dstDir)
+	fs.MustSyncPath(dstDir)
 	parentDir := filepath.Dir(dstDir)
-	fs.SyncPath(parentDir)
+	fs.MustSyncPath(parentDir)
 
 	logger.Infof("created Table snapshot of %q at %q in %s", srcDir, dstDir, time.Since(startTime))
 	return nil
@@ -1033,9 +1029,7 @@ func runTransaction(txnLock *sync.RWMutex, pathPrefix, txnPath string) error {
 		if err != nil {
 			return fmt.Errorf("invalid path to remove: %s", err)
 		}
-		if err := os.RemoveAll(path); err != nil {
-			return fmt.Errorf("cannot remove %q: %s", path, err)
-		}
+		fs.MustRemoveAll(path)
 	}
 
 	// Move the new part to new directory.
@@ -1061,7 +1055,7 @@ func runTransaction(txnLock *sync.RWMutex, pathPrefix, txnPath string) error {
 	}
 
 	// Flush pathPrefix directory metadata to the underying storage.
-	fs.SyncPath(pathPrefix)
+	fs.MustSyncPath(pathPrefix)
 
 	// Remove the transaction file.
 	if err := os.Remove(txnPath); err != nil {

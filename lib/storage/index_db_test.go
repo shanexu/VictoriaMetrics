@@ -61,7 +61,7 @@ func TestIndexDBOpenClose(t *testing.T) {
 	defer metricIDCache.Reset()
 	defer metricNameCache.Reset()
 	for i := 0; i < 5; i++ {
-		db, err := openIndexDB("test-index-db", metricIDCache, metricNameCache)
+		db, err := openIndexDB("test-index-db", metricIDCache, metricNameCache, nil, nil)
 		if err != nil {
 			t.Fatalf("cannot open indexDB: %s", err)
 		}
@@ -83,7 +83,7 @@ func TestIndexDB(t *testing.T) {
 		defer metricIDCache.Reset()
 		defer metricNameCache.Reset()
 		dbName := "test-index-db-serial"
-		db, err := openIndexDB(dbName, metricIDCache, metricNameCache)
+		db, err := openIndexDB(dbName, metricIDCache, metricNameCache, nil, nil)
 		if err != nil {
 			t.Fatalf("cannot open indexDB: %s", err)
 		}
@@ -113,7 +113,7 @@ func TestIndexDB(t *testing.T) {
 
 		// Re-open the db and verify it works as expected.
 		db.MustClose()
-		db, err = openIndexDB(dbName, metricIDCache, metricNameCache)
+		db, err = openIndexDB(dbName, metricIDCache, metricNameCache, nil, nil)
 		if err != nil {
 			t.Fatalf("cannot open indexDB: %s", err)
 		}
@@ -134,7 +134,7 @@ func TestIndexDB(t *testing.T) {
 		defer metricIDCache.Reset()
 		defer metricNameCache.Reset()
 		dbName := "test-index-db-concurrent"
-		db, err := openIndexDB(dbName, metricIDCache, metricNameCache)
+		db, err := openIndexDB(dbName, metricIDCache, metricNameCache, nil, nil)
 		if err != nil {
 			t.Fatalf("cannot open indexDB: %s", err)
 		}
@@ -379,6 +379,19 @@ func testIndexDBCheckTSIDByName(db *indexDB, mns []MetricName, tsids []TSID, isC
 	for key := range allKeys {
 		if !hasValue(tks, []byte(key)) {
 			return fmt.Errorf("cannot find %q in %q", key, tks)
+		}
+	}
+
+	// Check timerseriesCounters only for serial test.
+	// Concurrent test may create duplicate timeseries, so GetSeriesCount
+	// would return more timeseries than needed.
+	if !isConcurrent {
+		n, err := db.GetSeriesCount()
+		if err != nil {
+			return fmt.Errorf("unexpected error in GetSeriesCount(): %s", err)
+		}
+		if n != uint64(len(timeseriesCounters)) {
+			return fmt.Errorf("unexpected GetSeriesCount(); got %d; want %d", n, uint64(len(timeseriesCounters)))
 		}
 	}
 

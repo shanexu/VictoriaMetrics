@@ -10,7 +10,7 @@
 
 VictoriaMetrics is fast, cost-effective and scalable time series database. It can be used as a long-term remote storage for Prometheus.
 It is available in [binary releases](https://github.com/VictoriaMetrics/VictoriaMetrics/releases),
-[docker images](https://hub.docker.com/r/valyala/victoria-metrics/) and
+[docker images](https://hub.docker.com/r/victoriametrics/victoria-metrics/) and
 in [source code](https://github.com/VictoriaMetrics/VictoriaMetrics).
 
 Cluster version is available [here](https://github.com/VictoriaMetrics/VictoriaMetrics/tree/cluster).
@@ -41,7 +41,7 @@ Cluster version is available [here](https://github.com/VictoriaMetrics/VictoriaM
   * [Graphite plaintext protocol](https://graphite.readthedocs.io/en/latest/feeding-carbon.html) with [tags](https://graphite.readthedocs.io/en/latest/tags.html#carbon)
     if `-graphiteListenAddr` is set.
   * [OpenTSDB put message](http://opentsdb.net/docs/build/html/api_telnet/put.html) if `-opentsdbListenAddr` is set.
-* Ideally works with big amounts of time series data from IoT sensors, connected car sensors and industrial sensors.
+* Ideally works with big amounts of time series data from Kubernetes, IoT sensors, connected cars and industrial telemetry.
 * Has open source [cluster version](https://github.com/VictoriaMetrics/VictoriaMetrics/tree/cluster).
 
 
@@ -50,36 +50,51 @@ Cluster version is available [here](https://github.com/VictoriaMetrics/VictoriaM
 
 ### Table of contents
 
-* [How to build from sources](#how-to-build-from-sources)
-* [How to start VictoriaMetrics](#how-to-start-victoriametrics)
-* [Third-party contributions](#third-party-contributions)
-* [Prometheus setup](#prometheus-setup)
-* [Grafana setup](#grafana-setup)
-* [How to send data from InfluxDB-compatible agents such as Telegraf](#how-to-send-data-from-influxdb-compatible-agents-such-as-telegraf)
-* [How to send data from Graphite-compatible agents such as StatsD](#how-to-send-data-from-graphite-compatible-agents-such-as-statsd)
-* [How to send data from OpenTSDB-compatible agents](#how-to-send-data-from-opentsdb-compatible-agents)
-* [How to apply new config / ugrade VictoriaMetrics](#how-to-apply-new-config--upgrade-victoriametrics)
-* [How to work with snapshots](#how-to-work-with-snapshots)
-* [How to delete time series](#how-to-delete-time-series)
-* [How to export time series](#how-to-export-time-series)
-* [Federation](#federation)
-* [Capacity planning](#capacity-planning)
-* [High Availability](#high-availability)
-* [Multiple retentions](#multiple-retentions)
-* [Scalability and cluster version](#scalability-and-cluster-version)
-* [Security](#security)
-* [Tuning](#tuning)
-* [Monitoring](#monitoring)
-* [Troubleshooting](#troubleshooting)
-* [Contacts](#contacts)
-* [Community and contributions](#community-and-contributions)
-* [Reporting bugs](#reporting-bugs)
+- [Single-node VictoriaMetrics](#single-node-victoriametrics)
+- [Prominent features](#prominent-features)
+- [Operation](#operation)
+  - [Table of contents](#table-of-contents)
+  - [How to build from sources](#how-to-build-from-sources)
+    - [Development build](#development-build)
+    - [Production build](#production-build)
+    - [Building docker images](#building-docker-images)
+  - [How to start VictoriaMetrics](#how-to-start-victoriametrics)
+  - [Setting up service](#setting-up-service)
+  - [Third-party contributions](#third-party-contributions)
+  - [Prometheus setup](#prometheus-setup)
+  - [Grafana setup](#grafana-setup)
+  - [How to send data from InfluxDB-compatible agents such as Telegraf?](#how-to-send-data-from-influxdb-compatible-agents-such-as-telegraf)
+  - [How to send data from Graphite-compatible agents such as StatsD?](#how-to-send-data-from-graphite-compatible-agents-such-as-statsd)
+  - [How to send data from OpenTSDB-compatible agents?](#how-to-send-data-from-opentsdb-compatible-agents)
+  - [How to apply new config / upgrade VictoriaMetrics?](#how-to-apply-new-config--upgrade-victoriametrics)
+  - [How to work with snapshots?](#how-to-work-with-snapshots)
+  - [How to delete time series?](#how-to-delete-time-series)
+  - [How to export time series?](#how-to-export-time-series)
+  - [Federation](#federation)
+  - [Capacity planning](#capacity-planning)
+  - [High availability](#high-availability)
+  - [Multiple retentions](#multiple-retentions)
+  - [Downsampling](#downsampling)
+  - [Multi-tenancy](#multi-tenancy)
+  - [Scalability and cluster version](#scalability-and-cluster-version)
+  - [Security](#security)
+  - [Tuning](#tuning)
+  - [Monitoring](#monitoring)
+  - [Troubleshooting](#troubleshooting)
+- [Contacts](#contacts)
+- [Community and contributions](#community-and-contributions)
+- [Reporting bugs](#reporting-bugs)
+- [Victoria Metrics Logo](#victoria-metrics-logo)
+  - [Logo Usage Guidelines](#logo-usage-guidelines)
+    - [Font used:](#font-used)
+    - [Color Palette:](#color-palette)
+  - [We kindly ask:](#we-kindly-ask)
 
 
 ### How to build from sources
 
 We recommend using either [binary releases](https://github.com/VictoriaMetrics/VictoriaMetrics/releases) or
-[docker images](https://hub.docker.com/r/valyala/victoria-metrics/) instead of building VictoriaMetrics
+[docker images](https://hub.docker.com/r/victoriametrics/victoria-metrics/) instead of building VictoriaMetrics
 from sources. Building from sources is reasonable when developing an additional features specific
 to your needs.
 
@@ -98,10 +113,9 @@ to your needs.
 
 #### Building docker images
 
-Run `make package-victoria-metrics`. It will build `valyala/victoria-metrics:<PKG_TAG>` docker image locally.
+Run `make package-victoria-metrics`. It will build `victoriametrics/victoria-metrics:<PKG_TAG>` docker image locally.
 `<PKG_TAG>` is auto-generated image tag, which depends on source code in the repository.
 The `<PKG_TAG>` may be manually set via `PKG_TAG=foobar make package-victoria-metrics`.
-
 
 
 ### How to start VictoriaMetrics
@@ -118,9 +132,15 @@ The following command line flags are used the most:
 
 Pass `-help` to see all the available flags with description and default values.
 
+
+### Setting up service
+
+Read [these instructions](https://github.com/VictoriaMetrics/VictoriaMetrics/issues/43) on how to set up VictoriaMetrics as a service in your OS.
+
+
 ### Third-party contributions
 
-* [Unofficial yum repository](https://copr.fedorainfracloud.org/coprs/antonpatsev/VictoriaMetrics/) ([source code](https://github.com/patsevanton/VictoriaMetrics))
+* [Unofficial yum repository](https://copr.fedorainfracloud.org/coprs/antonpatsev/VictoriaMetrics/) ([source code](https://github.com/patsevanton/victoriametrics-rpm))
 
 
 ### Prometheus setup
@@ -186,10 +206,42 @@ For instance, put the following lines into `Telegraf` config, so it sends data t
 Do not forget substituting `<victoriametrics-addr>` with the real address where VictoriaMetrics runs.
 
 VictoriaMetrics maps Influx data using the following rules:
-* [`db` query arg](https://docs.influxdata.com/influxdb/v1.7/tools/api/#write-http-endpoint) is mapped into `db` label value
-* Field names are mapped to time series names prefixed by `{measurement}.` value
-* Field values are mapped to time series values
-* Tags are mapped to Prometheus labels as-is
+* [`db` query arg](https://docs.influxdata.com/influxdb/v1.7/tools/api/#write-http-endpoint) is mapped into `db` label value.
+* Field names are mapped to time series names prefixed with `{measurement}{separator}` value. `{separator}` equals to `.` by default, but can be changed with `-influxMeasurementFieldSeparator` command-line flag.
+* Field values are mapped to time series values.
+* Tags are mapped to Prometheus labels as-is.
+
+For example, the following Influx line:
+
+```
+foo,tag1=value1,tag2=value2 field1=12,field2=40
+```
+
+is converted into the following Prometheus data points:
+
+```
+foo.field1{tag1="value1", tag2="value2"} 12
+foo.field2{tag1="value1", tag2="value2"} 40
+```
+
+Example for writing data with Influx line protocol to local VictoriaMetrics using `curl`:
+
+```
+curl -d 'measurement,tag1=value1,tag2=value2 field1=123,field2=1.23' -X POST 'http://localhost:8428/write'
+```
+
+After that the data may be read via [/api/v1/export](#how-to-export-time-series) endpoint:
+
+```
+curl -G 'http://localhost:8428/api/v1/export' --data-urlencode 'match={__name__!=""}'
+```
+
+The `/api/v1/export` endpoint should return the following response:
+
+```
+{"metric":{"__name__":"measurement.field1","tag1":"value1","tag2":"value2"},"values":[123],"timestamps":[1560272508147]}
+{"metric":{"__name__":"measurement.field2","tag1":"value1","tag2":"value2"},"values":[1.23],"timestamps":[1560272508147]}
+```
 
 
 ### How to send data from Graphite-compatible agents such as [StatsD](https://github.com/etsy/statsd)?
@@ -198,11 +250,30 @@ VictoriaMetrics maps Influx data using the following rules:
 the following command will enable Graphite receiver in VictoriaMetrics on TCP and UDP port `2003`:
 
 ```
-/path/to/victoria-metrics-prod ... -graphiteListenAddr=:2003
+/path/to/victoria-metrics-prod -graphiteListenAddr=:2003
 ```
 
 2) Use the configured address in Graphite-compatible agents. For instance, set `graphiteHost`
 to the VictoriaMetrics host in `StatsD` configs.
+
+
+Example for writing data with Graphite plaintext protocol to local VictoriaMetrics using `nc`:
+
+```
+echo "foo.bar.baz;tag1=value1;tag2=value2 123 `date +%s`" | nc -N localhost 2003
+```
+
+After that the data may be read via [/api/v1/export](#how-to-export-time-series) endpoint:
+
+```
+curl -G 'http://localhost:8428/api/v1/export' --data-urlencode 'match={__name__!=""}'
+```
+
+The `/api/v1/export` endpoint should return the following response:
+
+```
+{"metric":{"__name__":"foo.bar.baz","tag1":"value1","tag2":"value2"},"values":[123],"timestamps":[1560277406000]}
+```
 
 
 ### How to send data from OpenTSDB-compatible agents?
@@ -211,10 +282,29 @@ to the VictoriaMetrics host in `StatsD` configs.
 the following command will enable OpenTSDB receiver in VictoriaMetrics on TCP and UDP port `4242`:
 
 ```
-/path/to/victoria-metrics-prod ... -opentsdbListenAddr=:4242
+/path/to/victoria-metrics-prod -opentsdbListenAddr=:4242
 ```
 
 2) Send data to the given address from OpenTSDB-compatible agents.
+
+
+Example for writing data with OpenTSDB protocol to local VictoriaMetrics using `nc`:
+
+```
+echo "put foo.bar.baz `date +%s` 123 tag1=value1 tag2=value2" | nc -N localhost 4242
+```
+
+After that the data may be read via [/api/v1/export](#how-to-export-time-series) endpoint:
+
+```
+curl -G 'http://localhost:8428/api/v1/export' --data-urlencode 'match={__name__!=""}'
+```
+
+The `/api/v1/export` endpoint should return the following response:
+
+```
+{"metric":{"__name__":"foo.bar.baz","tag1":"value1","tag2":"value2"},"values":[123],"timestamps":[1560277292000]}
+```
 
 
 ### How to apply new config / upgrade VictoriaMetrics?
@@ -341,6 +431,23 @@ Just start multiple VictoriaMetrics instances with distinct values for the follo
 * `-retentionPeriod`
 * `-storageDataPath`, so the data for each retention period is saved in a separate directory
 * `-httpListenAddr`, so clients may reach VictoriaMetrics instance with proper retention
+
+
+### Downsampling
+
+There is no downsampling support at the moment, but:
+- VictoriaMetrics is optimized for querying big amounts of raw data. See benchmark results for heavy queries
+  in [this article](https://medium.com/@valyala/measuring-vertical-scalability-for-time-series-databases-in-google-cloud-92550d78d8ae).
+- VictoriaMetrics has good compression for on-disk data. See [this article](https://medium.com/@valyala/victoriametrics-achieving-better-compression-for-time-series-data-than-gorilla-317bc1f95932)
+  for details.
+
+These properties reduce the need in downsampling. We plan implementing downsampling in the future.
+See [this issue](https://github.com/VictoriaMetrics/VictoriaMetrics/issues/36) for details.
+
+
+### Multi-tenancy
+
+Single-node VictoriaMetrics doesn't support multi-tenancy. Use [cluster version](https://github.com/VictoriaMetrics/VictoriaMetrics/tree/cluster) instead.
 
 
 ### Scalability and cluster version

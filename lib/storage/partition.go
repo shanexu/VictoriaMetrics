@@ -212,14 +212,8 @@ func createPartition(timestamp int64, smallPartitionsPath, bigPartitionsPath str
 // The pt must be detached from table before calling pt.Drop.
 func (pt *partition) Drop() {
 	logger.Infof("dropping partition %q at smallPartsPath=%q, bigPartsPath=%q", pt.name, pt.smallPartsPath, pt.bigPartsPath)
-
-	if err := os.RemoveAll(pt.smallPartsPath); err != nil {
-		logger.Panicf("FATAL: cannot remove small parts directory %q: %s", pt.smallPartsPath, err)
-	}
-	if err := os.RemoveAll(pt.bigPartsPath); err != nil {
-		logger.Panicf("FATAL: cannot remove big parts directory %q: %s", pt.bigPartsPath, err)
-	}
-
+	fs.MustRemoveAll(pt.smallPartsPath)
+	fs.MustRemoveAll(pt.bigPartsPath)
 	logger.Infof("partition %q has been dropped", pt.name)
 }
 
@@ -1223,13 +1217,9 @@ func openParts(pathPrefix1, pathPrefix2, path string) ([]*partWrapper, error) {
 	}
 
 	txnDir := path + "/txn"
-	if err := os.RemoveAll(txnDir); err != nil {
-		return nil, fmt.Errorf("cannot delete transaction directory %q: %s", txnDir, err)
-	}
+	fs.MustRemoveAll(txnDir)
 	tmpDir := path + "/tmp"
-	if err := os.RemoveAll(tmpDir); err != nil {
-		return nil, fmt.Errorf("cannot remove temporary directory %q: %s", tmpDir, err)
-	}
+	fs.MustRemoveAll(tmpDir)
 	if err := createPartitionDirs(path); err != nil {
 		return nil, fmt.Errorf("cannot create directories for partition %q: %s", path, err)
 	}
@@ -1342,8 +1332,8 @@ func (pt *partition) createSnapshot(srcDir, dstDir string) error {
 		}
 	}
 
-	fs.SyncPath(dstDir)
-	fs.SyncPath(filepath.Dir(dstDir))
+	fs.MustSyncPath(dstDir)
+	fs.MustSyncPath(filepath.Dir(dstDir))
 
 	return nil
 }
@@ -1408,9 +1398,7 @@ func runTransaction(txnLock *sync.RWMutex, pathPrefix1, pathPrefix2, txnPath str
 		if err != nil {
 			return fmt.Errorf("invalid path to remove: %s", err)
 		}
-		if err := os.RemoveAll(path); err != nil {
-			return fmt.Errorf("cannot remove %q: %s", path, err)
-		}
+		fs.MustRemoveAll(path)
 	}
 
 	// Move the new part to new directory.
@@ -1438,14 +1426,12 @@ func runTransaction(txnLock *sync.RWMutex, pathPrefix1, pathPrefix2, txnPath str
 		}
 	} else {
 		// Just remove srcPath.
-		if err := os.RemoveAll(srcPath); err != nil {
-			return fmt.Errorf("cannot remove %q: %s", srcPath, err)
-		}
+		fs.MustRemoveAll(srcPath)
 	}
 
 	// Flush pathPrefix* directory metadata to the underying storage.
-	fs.SyncPath(pathPrefix1)
-	fs.SyncPath(pathPrefix2)
+	fs.MustSyncPath(pathPrefix1)
+	fs.MustSyncPath(pathPrefix2)
 
 	// Remove the transaction file.
 	if err := os.Remove(txnPath); err != nil {
@@ -1487,6 +1473,6 @@ func createPartitionDirs(path string) error {
 	if err := fs.MkdirAllFailIfExist(tmpPath); err != nil {
 		return fmt.Errorf("cannot create tmp directory %q: %s", tmpPath, err)
 	}
-	fs.SyncPath(path)
+	fs.MustSyncPath(path)
 	return nil
 }

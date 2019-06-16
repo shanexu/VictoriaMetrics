@@ -32,6 +32,13 @@ again:
 		if err == nil {
 			return dstBuf, tailBuf, fmt.Errorf("no forward progress made")
 		}
+		if err == io.EOF && len(dstBuf) > 0 {
+			// Missing newline in the end of stream. This is OK,
+			/// so suppress io.EOF for now. It will be returned during the next
+			// call to ReadLinesBlock.
+			// This fixes https://github.com/VictoriaMetrics/VictoriaMetrics/issues/60 .
+			return dstBuf, tailBuf, nil
+		}
 		return dstBuf, tailBuf, err
 	}
 	dstBuf = dstBuf[:len(dstBuf)+n]

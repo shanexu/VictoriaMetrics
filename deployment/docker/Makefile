@@ -1,5 +1,5 @@
-DOCKER_NAMESPACE := valyala
-BUILDER_IMAGE := local/builder:go1.12.5
+DOCKER_NAMESPACE := victoriametrics
+BUILDER_IMAGE := local/builder:go1.12.6
 CERTS_IMAGE := local/certs:1.0.2
 
 package-certs:

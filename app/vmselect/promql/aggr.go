@@ -100,10 +100,18 @@ func aggrFuncExt(afe func(tss []*timeseries) []*timeseries, argOrig []*timeserie
 	}
 	bbPool.Put(bb)
 
+	srcTssCount := 0
+	dstTssCount := 0
 	rvs := make([]*timeseries, 0, len(m))
 	for _, tss := range m {
 		rv := afe(tss)
 		rvs = append(rvs, rv...)
+		srcTssCount += len(tss)
+		dstTssCount += len(rv)
+		if dstTssCount > 2000 && dstTssCount > 16*srcTssCount {
+			// This looks like count_values explosion.
+			return nil, fmt.Errorf(`too many timeseries after aggragation; got %d; want less than %d`, dstTssCount, 16*srcTssCount)
+		}
 	}
 	return rvs, nil
 }
@@ -301,6 +309,9 @@ func aggrFuncCountValues(afa *aggrFuncArg) ([]*timeseries, error) {
 		m := make(map[float64]bool)
 		for _, ts := range tss {
 			for _, v := range ts.Values {
+				if math.IsNaN(v) {
+					continue
+				}
 				m[v] = true
 			}
 		}
@@ -313,7 +324,7 @@ func aggrFuncCountValues(afa *aggrFuncArg) ([]*timeseries, error) {
 		var rvs []*timeseries
 		for _, v := range values {
 			var dst timeseries
-			dst.CopyFrom(tss[0])
+			dst.CopyFromShallowTimestamps(tss[0])
 			dst.MetricName.RemoveTag(dstLabel)
 			dst.MetricName.AddTag(dstLabel, strconv.FormatFloat(v, 'g', -1, 64))
 			for i := range dst.Values {
@@ -457,6 +468,7 @@ func newAggrQuantileFunc(phis []float64) func(tss []*timeseries) []*timeseries {
 			idx := int(math.Round(float64(len(tss)-1) * phi))
 			dst.Values[n] = tss[idx].Values[n]
 		}
+		tss[0] = dst
 		return tss[:1]
 	}
 }
