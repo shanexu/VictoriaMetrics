@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/filestream"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
@@ -70,8 +72,8 @@ var (
 	readersCount = metrics.NewCounter(`vm_fs_readers`)
 )
 
-// SyncPath syncs contents of the given path.
-func SyncPath(path string) {
+// MustSyncPath syncs contents of the given path.
+func MustSyncPath(path string) {
 	d, err := os.Open(path)
 	if err != nil {
 		logger.Panicf("FATAL: cannot open %q: %s", path, err)
@@ -111,8 +113,8 @@ func WriteFile(path string, data []byte) error {
 	if err != nil {
 		return fmt.Errorf("cannot obtain absolute path to %q: %s", path, err)
 	}
-	parentDirPath, _ := filepath.Split(absPath)
-	SyncPath(parentDirPath)
+	parentDirPath := filepath.Dir(absPath)
+	MustSyncPath(parentDirPath)
 
 	return nil
 }
@@ -122,7 +124,7 @@ func MkdirAllIfNotExist(path string) error {
 	if IsPathExist(path) {
 		return nil
 	}
-	return os.MkdirAll(path, 0755)
+	return mkdirSync(path)
 }
 
 // MkdirAllFailIfExist creates the given path dir if it isn't exist.
@@ -132,7 +134,18 @@ func MkdirAllFailIfExist(path string) error {
 	if IsPathExist(path) {
 		return fmt.Errorf("the %q already exists", path)
 	}
-	return os.MkdirAll(path, 0755)
+	return mkdirSync(path)
+}
+
+func mkdirSync(path string) error {
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return err
+	}
+	// Sync the parent directory, so the created directory becomes visible
+	// in the fs after power loss.
+	parentDirPath := filepath.Dir(path)
+	MustSyncPath(parentDirPath)
+	return nil
 }
 
 // RemoveDirContents removes all the contents of the given dir it it exists.
@@ -159,11 +172,9 @@ func RemoveDirContents(dir string) {
 			continue
 		}
 		fullPath := dir + "/" + name
-		if err := os.RemoveAll(fullPath); err != nil {
-			logger.Panicf("FATAL: cannot remove %q: %s", fullPath, err)
-		}
+		MustRemoveAll(fullPath)
 	}
-	SyncPath(dir)
+	MustSyncPath(dir)
 }
 
 // MustClose must close the given file f.
@@ -185,18 +196,79 @@ func IsPathExist(path string) bool {
 	return true
 }
 
-// MustRemoveAllSynced removes path with all the contents
-// and syncs the parent directory, so it no longer contains the path.
-func MustRemoveAllSynced(path string) {
-	if err := os.RemoveAll(path); err != nil {
+func mustSyncParentDirIfExists(path string) {
+	parentDirPath := filepath.Dir(path)
+	if !IsPathExist(parentDirPath) {
+		return
+	}
+	MustSyncPath(parentDirPath)
+}
+
+// MustRemoveAll removes path with all the contents.
+//
+// It properly handles NFS issue https://github.com/VictoriaMetrics/VictoriaMetrics/issues/61 .
+func MustRemoveAll(path string) {
+	err := os.RemoveAll(path)
+	if err == nil {
+		// Make sure the parent directory doesn't contain references
+		// to the current directory.
+		mustSyncParentDirIfExists(path)
+		return
+	}
+	if !isTemporaryNFSError(err) {
 		logger.Panicf("FATAL: cannot remove %q: %s", path, err)
 	}
-	SyncPath(filepath.Dir(path))
+	// NFS prevents from removing directories with open files.
+	// See https://github.com/VictoriaMetrics/VictoriaMetrics/issues/61 .
+	// Schedule for later directory removal.
+	select {
+	case removeDirCh <- path:
+	default:
+		logger.Panicf("FATAL: cannot schedule %s for removal, since the removal queue is full (%d entries)", path, cap(removeDirCh))
+	}
+}
+
+var removeDirCh = make(chan string, 1024)
+
+func dirRemover() {
+	for path := range removeDirCh {
+		attempts := 0
+		for {
+			err := os.RemoveAll(path)
+			if err == nil {
+				break
+			}
+			if !isTemporaryNFSError(err) {
+				logger.Panicf("FATAL: cannot remove %q: %s", path, err)
+			}
+			// NFS prevents from removing directories with open files.
+			// Sleep for a while and try again in the hope open files will be closed.
+			// See https://github.com/VictoriaMetrics/VictoriaMetrics/issues/61 .
+			attempts++
+			if attempts > 10 {
+				logger.Panicf("FATAL: cannot remove %q in %d attempts: %s", path, attempts, err)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		// Make sure the parent directory doesn't contain references
+		// to the current directory.
+		mustSyncParentDirIfExists(path)
+	}
+}
+
+func isTemporaryNFSError(err error) bool {
+	// See https://github.com/VictoriaMetrics/VictoriaMetrics/issues/61 for details.
+	errStr := err.Error()
+	return strings.Contains(errStr, "directory not empty") || strings.Contains(errStr, "device or resource busy")
+}
+
+func init() {
+	go dirRemover()
 }
 
 // HardLinkFiles makes hard links for all the files from srcDir in dstDir.
 func HardLinkFiles(srcDir, dstDir string) error {
-	if err := os.MkdirAll(dstDir, 0755); err != nil {
+	if err := mkdirSync(dstDir); err != nil {
 		return fmt.Errorf("cannot create dstDir=%q: %s", dstDir, err)
 	}
 
@@ -227,7 +299,7 @@ func HardLinkFiles(srcDir, dstDir string) error {
 		}
 	}
 
-	SyncPath(dstDir)
+	MustSyncPath(dstDir)
 	return nil
 }
 

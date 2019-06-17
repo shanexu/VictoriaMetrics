@@ -61,7 +61,7 @@ func TestIndexDBOpenClose(t *testing.T) {
 	defer metricIDCache.Reset()
 	defer metricNameCache.Reset()
 	for i := 0; i < 5; i++ {
-		db, err := openIndexDB("test-index-db", metricIDCache, metricNameCache)
+		db, err := openIndexDB("test-index-db", metricIDCache, metricNameCache, nil, nil)
 		if err != nil {
 			t.Fatalf("cannot open indexDB: %s", err)
 		}
@@ -83,7 +83,7 @@ func TestIndexDB(t *testing.T) {
 		defer metricIDCache.Reset()
 		defer metricNameCache.Reset()
 		dbName := "test-index-db-serial"
-		db, err := openIndexDB(dbName, metricIDCache, metricNameCache)
+		db, err := openIndexDB(dbName, metricIDCache, metricNameCache, nil, nil)
 		if err != nil {
 			t.Fatalf("cannot open indexDB: %s", err)
 		}
@@ -113,7 +113,7 @@ func TestIndexDB(t *testing.T) {
 
 		// Re-open the db and verify it works as expected.
 		db.MustClose()
-		db, err = openIndexDB(dbName, metricIDCache, metricNameCache)
+		db, err = openIndexDB(dbName, metricIDCache, metricNameCache, nil, nil)
 		if err != nil {
 			t.Fatalf("cannot open indexDB: %s", err)
 		}
@@ -134,7 +134,7 @@ func TestIndexDB(t *testing.T) {
 		defer metricIDCache.Reset()
 		defer metricNameCache.Reset()
 		dbName := "test-index-db-concurrent"
-		db, err := openIndexDB(dbName, metricIDCache, metricNameCache)
+		db, err := openIndexDB(dbName, metricIDCache, metricNameCache, nil, nil)
 		if err != nil {
 			t.Fatalf("cannot open indexDB: %s", err)
 		}
@@ -401,6 +401,21 @@ func testIndexDBCheckTSIDByName(db *indexDB, mns []MetricName, tsids []TSID, isC
 		for key := range apKeys {
 			if !hasValue(tks, []byte(key)) {
 				return fmt.Errorf("cannot find %q in %q", key, tks)
+			}
+		}
+	}
+
+	// Check timerseriesCounters only for serial test.
+	// Concurrent test may create duplicate timeseries, so GetSeriesCount
+	// would return more timeseries than needed.
+	if !isConcurrent {
+		for k, tc := range timeseriesCounters {
+			n, err := db.GetSeriesCount(k.AccountID, k.ProjectID)
+			if err != nil {
+				return fmt.Errorf("unexpected error in GetSeriesCount(%v): %s", k, err)
+			}
+			if n != uint64(len(tc)) {
+				return fmt.Errorf("unexpected GetSeriesCount(%v); got %d; want %d", k, n, uint64(len(tc)))
 			}
 		}
 	}

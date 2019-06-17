@@ -24,7 +24,8 @@ var (
 	maxTagValuesPerSearch = flag.Int("search.maxTagValues", 10e3, "The maximum number of tag values returned per search")
 	maxMetricsPerSearch   = flag.Int("search.maxUniqueTimeseries", 100e3, "The maximum number of unique time series each search can scan")
 
-	precisionBits = flag.Int("precisionBits", 64, "The number of precision bits to store per each value. Lower precision bits improves data compression at the cost of precision loss")
+	precisionBits         = flag.Int("precisionBits", 64, "The number of precision bits to store per each value. Lower precision bits improves data compression at the cost of precision loss")
+	disableRPCCompression = flag.Bool(`rpc.disableCompression`, false, "Disable compression of RPC traffic. This reduces CPU usage at the cost of higher network bandwidth usage")
 )
 
 // Server processes connections from vminsert and vmselect.
@@ -193,9 +194,15 @@ func (s *Server) RunVMSelect() {
 				s.vmselectWG.Done()
 			}()
 
-			// Do not compress responses to vmselect, since these responses
-			// already contain compressed data.
-			compressionLevel := 0
+			// Compress responses to vmselect even if they already contain compressed blocks.
+			// Responses contain uncompressed metric names, which should compress well
+			// when the response contains high number of time series.
+			// Additionally, recently added metric blocks are usually uncompressed, so the compression
+			// should save network bandwidth.
+			compressionLevel := 1
+			if *disableRPCCompression {
+				compressionLevel = 0
+			}
 			bc, err := handshake.VMSelectServer(c, compressionLevel)
 			if err != nil {
 				if s.isStopping() {
@@ -440,6 +447,8 @@ func (s *Server) processVMSelectRequest(ctx *vmselectRequestCtx) error {
 		return s.processVMSelectSearchQuery(ctx)
 	case "labelValues":
 		return s.processVMSelectLabelValues(ctx)
+	case "labelEntries":
+		return s.processVMSelectLabelEntries(ctx)
 	case "labels":
 		return s.processVMSelectLabels(ctx)
 	case "seriesCount":
@@ -580,7 +589,10 @@ func (s *Server) processVMSelectLabelValues(ctx *vmselectRequestCtx) error {
 		return fmt.Errorf("cannot send empty error message: %s", err)
 	}
 
-	// Send labelValues to vmselect
+	return writeLabelValues(ctx, labelValues)
+}
+
+func writeLabelValues(ctx *vmselectRequestCtx, labelValues []string) error {
 	for _, labelValue := range labelValues {
 		if len(labelValue) == 0 {
 			// Skip empty label values, since they have no sense for prometheus.
@@ -588,6 +600,57 @@ func (s *Server) processVMSelectLabelValues(ctx *vmselectRequestCtx) error {
 		}
 		if err := ctx.writeString(labelValue); err != nil {
 			return fmt.Errorf("cannot write labelValue %q: %s", labelValue, err)
+		}
+	}
+	// Send 'end of label values' marker
+	if err := ctx.writeString(""); err != nil {
+		return fmt.Errorf("cannot send 'end of response' marker")
+	}
+	return nil
+}
+
+func (s *Server) processVMSelectLabelEntries(ctx *vmselectRequestCtx) error {
+	vmselectLabelEntriesRequests.Inc()
+
+	// Read request
+	accountID, err := ctx.readUint32()
+	if err != nil {
+		return fmt.Errorf("cannot read accountID: %s", err)
+	}
+	projectID, err := ctx.readUint32()
+	if err != nil {
+		return fmt.Errorf("cannot read projectID: %s", err)
+	}
+
+	// Perform the request
+	labelEntries, err := s.storage.SearchTagEntries(accountID, projectID, *maxTagKeysPerSearch, *maxTagValuesPerSearch)
+	if err != nil {
+		// Send the error message to vmselect.
+		errMsg := fmt.Sprintf("error during label entries search: %s", err)
+		if err := ctx.writeString(errMsg); err != nil {
+			return fmt.Errorf("cannot send error message: %s", err)
+		}
+		return nil
+	}
+
+	// Send an empty error message to vmselect.
+	if err := ctx.writeString(""); err != nil {
+		return fmt.Errorf("cannot send empty error message: %s", err)
+	}
+
+	// Send labelEntries to vmselect
+	for i := range labelEntries {
+		e := &labelEntries[i]
+		label := e.Key
+		if label == "" {
+			// Do this substitution in order to prevent clashing with 'end of response' marker.
+			label = "__name__"
+		}
+		if err := ctx.writeString(label); err != nil {
+			return fmt.Errorf("cannot write label %q: %s", label, err)
+		}
+		if err := writeLabelValues(ctx, e.Values); err != nil {
+			return fmt.Errorf("cannot write label values for %q: %s", label, err)
 		}
 	}
 
@@ -708,6 +771,7 @@ var (
 	vmselectDeleteMetricsRequests = metrics.NewCounter("vm_vmselect_delete_metrics_requests_total")
 	vmselectLabelsRequests        = metrics.NewCounter("vm_vmselect_labels_requests_total")
 	vmselectLabelValuesRequests   = metrics.NewCounter("vm_vmselect_label_values_requests_total")
+	vmselectLabelEntriesRequests  = metrics.NewCounter("vm_vmselect_label_entries_requests_total")
 	vmselectSeriesCountRequests   = metrics.NewCounter("vm_vmselect_series_count_requests_total")
 	vmselectSearchQueryRequests   = metrics.NewCounter("vm_vmselect_search_query_requests_total")
 	vmselectMetricBlocksRead      = metrics.NewCounter("vm_vmselect_metric_blocks_read_total")
