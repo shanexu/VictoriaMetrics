@@ -152,6 +152,7 @@ remote_write:
   - url: http://<victoriametrics-addr>:8428/api/v1/write
     queue_config:
       max_samples_per_send: 10000
+      max_shards: 100
 ```
 
 Substitute `<victoriametrics-addr>` with the hostname or IP address of VictoriaMetrics.
@@ -230,6 +231,7 @@ Example for writing data with Influx line protocol to local VictoriaMetrics usin
 curl -d 'measurement,tag1=value1,tag2=value2 field1=123,field2=1.23' -X POST 'http://localhost:8428/write'
 ```
 
+Arbitrary number of lines delimited by '\n' may be sent in a single request.
 After that the data may be read via [/api/v1/export](#how-to-export-time-series) endpoint:
 
 ```
@@ -263,6 +265,8 @@ Example for writing data with Graphite plaintext protocol to local VictoriaMetri
 echo "foo.bar.baz;tag1=value1;tag2=value2 123 `date +%s`" | nc -N localhost 2003
 ```
 
+VictoriaMetrics sets the current time if timestamp is omitted.
+Arbitrary number of lines delimited by `\n` may be sent in one go.
 After that the data may be read via [/api/v1/export](#how-to-export-time-series) endpoint:
 
 ```
@@ -294,6 +298,7 @@ Example for writing data with OpenTSDB protocol to local VictoriaMetrics using `
 echo "put foo.bar.baz `date +%s` 123 tag1=value1 tag2=value2" | nc -N localhost 4242
 ```
 
+Arbitrary number of lines delimited by `\n` may be sent in one go.
 After that the data may be read via [/api/v1/export](#how-to-export-time-series) endpoint:
 
 ```
