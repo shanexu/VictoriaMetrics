@@ -38,7 +38,7 @@ func TestSearchQueryMarshalUnmarshal(t *testing.T) {
 		if len(tail) > 0 {
 			t.Fatalf("unexpected tail left after SearchQuery unmarshaling; tail (len=%d): %q", len(tail), tail)
 		}
-		if sq1.AccountID != sq1.AccountID {
+		if sq2.AccountID != sq1.AccountID {
 			t.Fatalf("unexpected AccountID; got %d; want %d", sq2.AccountID, sq1.AccountID)
 		}
 		if sq2.ProjectID != sq1.ProjectID {
@@ -50,7 +50,7 @@ func TestSearchQueryMarshalUnmarshal(t *testing.T) {
 		if sq1.MaxTimestamp != sq2.MaxTimestamp {
 			t.Fatalf("unexpected MaxTimestamp; got %d; want %d", sq2.MaxTimestamp, sq1.MaxTimestamp)
 		}
-		if len(sq1.TagFilterss) != len(sq1.TagFilterss) {
+		if len(sq1.TagFilterss) != len(sq2.TagFilterss) {
 			t.Fatalf("unexpected TagFilterss len; got %d; want %d", len(sq2.TagFilterss), len(sq1.TagFilterss))
 		}
 		for ii := range sq1.TagFilterss {

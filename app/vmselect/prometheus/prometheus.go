@@ -23,13 +23,8 @@ import (
 var (
 	maxQueryDuration = flag.Duration("search.maxQueryDuration", time.Second*30, "The maximum time for search query execution")
 	maxQueryLen      = flag.Int("search.maxQueryLen", 16*1024, "The maximum search query length in bytes")
-
-	selectNodes flagutil.Array
+	selectNodes      = flagutil.NewArray("selectNode", "Addresses of vmselect nodes; usage: -selectNode=vmselect-host1:8481 -selectNode=vmselect-host2:8481")
 )
-
-func init() {
-	flag.Var(&selectNodes, "selectNode", "vmselect address, usage -selectNode=vmselect-host1:8481 -selectNode=vmselect-host2:8481")
-}
 
 // Default step used if not set.
 const defaultStep = 5 * 60 * 1000
@@ -46,6 +41,9 @@ func FederateHandler(at *auth.Token, w http.ResponseWriter, r *http.Request) err
 		return fmt.Errorf("cannot parse request form values: %s", err)
 	}
 	matches := r.Form["match[]"]
+	if len(matches) == 0 {
+		return fmt.Errorf("missing `match[]` arg")
+	}
 	maxLookback, err := getDuration(r, "max_lookback", defaultStep)
 	if err != nil {
 		return err
@@ -117,6 +115,9 @@ func ExportHandler(at *auth.Token, w http.ResponseWriter, r *http.Request) error
 	if len(matches) == 0 {
 		// Maintain backwards compatibility
 		match := r.FormValue("match")
+		if len(match) == 0 {
+			return fmt.Errorf("missing `match[]` arg")
+		}
 		matches = []string{match}
 	}
 	start, err := getTime(r, "start", 0)
@@ -212,6 +213,9 @@ func DeleteHandler(at *auth.Token, r *http.Request) error {
 		return fmt.Errorf("start and end aren't supported. Remove these args from the query in order to delete all the matching metrics")
 	}
 	matches := r.Form["match[]"]
+	if len(matches) == 0 {
+		return fmt.Errorf("missing `match[]` arg")
+	}
 	deadline := getDeadline(r)
 	tagFilterss, err := getTagFilterssFromMatches(matches)
 	if err != nil {
@@ -239,10 +243,10 @@ func DeleteHandler(at *auth.Token, r *http.Request) error {
 var deleteDuration = metrics.NewSummary(`vm_request_duration_seconds{path="/api/v1/admin/tsdb/delete_series"}`)
 
 func resetRollupResultCaches() {
-	if len(selectNodes) == 0 {
+	if len(*selectNodes) == 0 {
 		logger.Panicf("BUG: missing -selectNode flag")
 	}
-	for _, selectNode := range selectNodes {
+	for _, selectNode := range *selectNodes {
 		callURL := fmt.Sprintf("http://%s/internal/resetRollupResultCache", selectNode)
 		resp, err := httpClient.Get(callURL)
 		if err != nil {
@@ -353,6 +357,9 @@ func SeriesHandler(at *auth.Token, w http.ResponseWriter, r *http.Request) error
 		return fmt.Errorf("cannot parse form values: %s", err)
 	}
 	matches := r.Form["match[]"]
+	if len(matches) == 0 {
+		return fmt.Errorf("missing `match[]` arg")
+	}
 	start, err := getTime(r, "start", ct-defaultStep)
 	if err != nil {
 		return err
@@ -420,6 +427,9 @@ func QueryHandler(at *auth.Token, w http.ResponseWriter, r *http.Request) error 
 	ct := currentTime()
 
 	query := r.FormValue("query")
+	if len(query) == 0 {
+		return fmt.Errorf("missing `query` arg")
+	}
 	start, err := getTime(r, "time", ct)
 	if err != nil {
 		return err
@@ -491,6 +501,9 @@ func QueryRangeHandler(at *auth.Token, w http.ResponseWriter, r *http.Request) e
 	ct := currentTime()
 
 	query := r.FormValue("query")
+	if len(query) == 0 {
+		return fmt.Errorf("missing `query` arg")
+	}
 	start, err := getTime(r, "start", ct-defaultStep)
 	if err != nil {
 		return err
