@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	maxPointsPerTimeseries = flag.Int("search.maxPointsPerTimeseries", 10e3, "The maximum points per a single timeseries returned from the search")
+	maxPointsPerTimeseries = flag.Int("search.maxPointsPerTimeseries", 30e3, "The maximum points per a single timeseries returned from the search")
 )
 
 // The minimum number of points per timeseries for enabling time rounding.
@@ -31,7 +31,7 @@ const minTimeseriesPointsForTimeRounding = 50
 func ValidateMaxPointsPerTimeseries(start, end, step int64) error {
 	points := (end-start)/step + 1
 	if uint64(points) > uint64(*maxPointsPerTimeseries) {
-		return fmt.Errorf(`too many points for the given step=%d, start=%d and end=%d: %d; cannot exceed %d points`,
+		return fmt.Errorf(`too many points for the given step=%d, start=%d and end=%d: %d; cannot exceed -search.maxPointsPerTimeseries=%d`,
 			step, start, end, uint64(points), *maxPointsPerTimeseries)
 	}
 	return nil
@@ -379,8 +379,7 @@ func evalRollupFuncWithSubquery(ec *EvalConfig, name string, rf rollupFunc, re *
 	}
 
 	ecSQ := newEvalConfig(ec)
-	ecSQ.Start -= window + maxSilenceInterval
-	ecSQ.End += step
+	ecSQ.Start -= window + maxSilenceInterval + step
 	ecSQ.Step = step
 	if err := ValidateMaxPointsPerTimeseries(ecSQ.Start, ecSQ.End, ecSQ.Step); err != nil {
 		return nil, err
@@ -585,13 +584,14 @@ func getRollupConfigs(name string, rf rollupFunc, start, end, step, window int64
 	}
 	newRollupConfig := func(rf rollupFunc, tagValue string) *rollupConfig {
 		return &rollupConfig{
-			TagValue:   tagValue,
-			Func:       rf,
-			Start:      start,
-			End:        end,
-			Step:       step,
-			Window:     window,
-			Timestamps: sharedTimestamps,
+			TagValue:        tagValue,
+			Func:            rf,
+			Start:           start,
+			End:             end,
+			Step:            step,
+			Window:          window,
+			MayAdjustWindow: rollupFuncsMayAdjustWindow[name],
+			Timestamps:      sharedTimestamps,
 		}
 	}
 	appendRollupConfigs := func(dst []*rollupConfig) []*rollupConfig {
