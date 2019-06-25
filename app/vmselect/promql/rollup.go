@@ -19,13 +19,14 @@ var rollupFuncs = map[string]newRollupFunc{
 	// See funcs accepting range-vector on https://prometheus.io/docs/prometheus/latest/querying/functions/ .
 	"changes":            newRollupFuncOneArg(rollupChanges),
 	"delta":              newRollupFuncOneArg(rollupDelta),
-	"deriv":              newRollupFuncOneArg(rollupDeriv),
+	"deriv":              newRollupFuncOneArg(rollupDerivSlow),
+	"deriv_fast":         newRollupFuncOneArg(rollupDerivFast),
 	"holt_winters":       newRollupHoltWinters,
 	"idelta":             newRollupFuncOneArg(rollupIdelta),
 	"increase":           newRollupFuncOneArg(rollupDelta),  // + rollupFuncsRemoveCounterResets
 	"irate":              newRollupFuncOneArg(rollupIderiv), // + rollupFuncsRemoveCounterResets
 	"predict_linear":     newRollupPredictLinear,
-	"rate":               newRollupFuncOneArg(rollupDeriv), // + rollupFuncsRemoveCounterResets
+	"rate":               newRollupFuncOneArg(rollupDerivFast), // + rollupFuncsRemoveCounterResets
 	"resets":             newRollupFuncOneArg(rollupResets),
 	"avg_over_time":      newRollupFuncOneArg(rollupAvg),
 	"min_over_time":      newRollupFuncOneArg(rollupMin),
@@ -37,6 +38,8 @@ var rollupFuncs = map[string]newRollupFunc{
 	"stdvar_over_time":   newRollupFuncOneArg(rollupStdvar),
 
 	// Additional rollup funcs.
+	"sum2_over_time":     newRollupFuncOneArg(rollupSum2),
+	"geomean_over_time":  newRollupFuncOneArg(rollupGeomean),
 	"first_over_time":    newRollupFuncOneArg(rollupFirst),
 	"last_over_time":     newRollupFuncOneArg(rollupLast),
 	"distinct_over_time": newRollupFuncOneArg(rollupDistinct),
@@ -47,6 +50,13 @@ var rollupFuncs = map[string]newRollupFunc{
 	"rollup_deriv":       newRollupFuncOneArg(rollupFake),
 	"rollup_delta":       newRollupFuncOneArg(rollupFake),
 	"rollup_increase":    newRollupFuncOneArg(rollupFake), // + rollupFuncsRemoveCounterResets
+}
+
+var rollupFuncsMayAdjustWindow = map[string]bool{
+	"deriv":      true,
+	"deriv_fast": true,
+	"irate":      true,
+	"rate":       true,
 }
 
 var rollupFuncsRemoveCounterResets = map[string]bool{
@@ -64,6 +74,7 @@ var rollupFuncsKeepMetricGroup = map[string]bool{
 	"max_over_time":      true,
 	"quantile_over_time": true,
 	"rollup":             true,
+	"geomean_over_time":  true,
 }
 
 func getRollupArgIdx(funcName string) int {
@@ -120,6 +131,13 @@ type rollupConfig struct {
 	Step   int64
 	Window int64
 
+	// Whether window may be adjusted to 2 x interval between data points.
+	// This is needed for functions which have dt in the denominator
+	// such as rate, deriv, etc.
+	// Without the adjustement their value would jump in unexpected directions
+	// when using window smaller than 2 x scrape_interval.
+	MayAdjustWindow bool
+
 	Timestamps []int64
 }
 
@@ -162,7 +180,7 @@ func (rc *rollupConfig) Do(dstValues []float64, values []float64, timestamps []i
 	if window <= 0 {
 		window = rc.Step
 	}
-	if window < maxPrevInterval {
+	if rc.MayAdjustWindow && window < maxPrevInterval {
 		window = maxPrevInterval
 	}
 	rfa := getRollupFuncArg()
@@ -171,8 +189,7 @@ func (rc *rollupConfig) Do(dstValues []float64, values []float64, timestamps []i
 
 	i := 0
 	j := 0
-	for _, ts := range rc.Timestamps {
-		tEnd := ts + rc.Step
+	for _, tEnd := range rc.Timestamps {
 		tStart := tEnd - window
 		n := sort.Search(len(timestamps)-i, func(n int) bool {
 			return timestamps[i+n] > tStart
@@ -296,11 +313,11 @@ func newRollupHoltWinters(args []interface{}) (rollupFunc, error) {
 		return nil, err
 	}
 	rf := func(rfa *rollupFuncArg) float64 {
-		// There is no need in handling NaNs here, since they must be cleanup up
+		// There is no need in handling NaNs here, since they must be cleaned up
 		// before calling rollup funcs.
 		values := rfa.values
 		if len(values) == 0 {
-			return nan
+			return rfa.prevValue
 		}
 		sf := sfs[rfa.idx]
 		if sf <= 0 || sf >= 1 {
@@ -342,39 +359,53 @@ func newRollupPredictLinear(args []interface{}) (rollupFunc, error) {
 		return nil, err
 	}
 	rf := func(rfa *rollupFuncArg) float64 {
-		// There is no need in handling NaNs here, since they must be cleanup up
-		// before calling rollup funcs.
-		values := rfa.values
-		timestamps := rfa.timestamps
-		if len(values) == 0 {
+		v, k := linearRegression(rfa)
+		if math.IsNaN(v) {
 			return nan
 		}
-
-		// See https://en.wikipedia.org/wiki/Simple_linear_regression#Numerical_example
-		// TODO: determine whether this shit really works.
-		tFirst := rfa.prevTimestamp
-		vSum := rfa.prevValue
-		if math.IsNaN(rfa.prevValue) {
-			tFirst = timestamps[0]
-			vSum = 0
-		}
-		tSum := float64(0)
-		tvSum := float64(0)
-		ttSum := float64(0)
-		for i, v := range values {
-			dt := float64(timestamps[i]-tFirst) * 1e-3
-			vSum += v
-			tSum += dt
-			tvSum += dt * v
-			ttSum += dt * dt
-		}
-		n := float64(len(values))
-		k := (n*tvSum - tSum*vSum) / (n*ttSum - tSum*tSum)
-		v := (vSum - k*tSum) / n
 		sec := secs[rfa.idx]
 		return v + k*sec
 	}
 	return rf, nil
+}
+
+func linearRegression(rfa *rollupFuncArg) (float64, float64) {
+	// There is no need in handling NaNs here, since they must be cleaned up
+	// before calling rollup funcs.
+	values := rfa.values
+	timestamps := rfa.timestamps
+	if len(values) == 0 {
+		return rfa.prevValue, 0
+	}
+
+	// See https://en.wikipedia.org/wiki/Simple_linear_regression#Numerical_example
+	tFirst := rfa.prevTimestamp
+	vSum := rfa.prevValue
+	tSum := float64(0)
+	tvSum := float64(0)
+	ttSum := float64(0)
+	n := 1.0
+	if math.IsNaN(rfa.prevValue) {
+		tFirst = timestamps[0]
+		vSum = 0
+		n = 0
+	}
+	for i, v := range values {
+		dt := float64(timestamps[i]-tFirst) * 1e-3
+		vSum += v
+		tSum += dt
+		tvSum += dt * v
+		ttSum += dt * dt
+	}
+	n += float64(len(values))
+	if n == 1 {
+		return vSum, 0
+	}
+	k := (n*tvSum - tSum*vSum) / (n*ttSum - tSum*tSum)
+	v := (vSum - k*tSum) / n
+	// Adjust v to the last timestamp on the given time range.
+	v += k * (float64(timestamps[len(timestamps)-1]-tFirst) * 1e-3)
+	return v, k
 }
 
 func newRollupQuantile(args []interface{}) (rollupFunc, error) {
@@ -386,11 +417,15 @@ func newRollupQuantile(args []interface{}) (rollupFunc, error) {
 		return nil, err
 	}
 	rf := func(rfa *rollupFuncArg) float64 {
-		// There is no need in handling NaNs here, since they must be cleanup up
+		// There is no need in handling NaNs here, since they must be cleaned up
 		// before calling rollup funcs.
 		values := rfa.values
 		if len(values) == 0 {
-			return nan
+			return rfa.prevValue
+		}
+		if len(values) == 1 {
+			// Fast path - only a single value.
+			return values[0]
 		}
 		hf := histogram.GetFast()
 		for _, v := range values {
@@ -408,11 +443,11 @@ func rollupAvg(rfa *rollupFuncArg) float64 {
 	// Do not use `Rapid calculation methods` at https://en.wikipedia.org/wiki/Standard_deviation,
 	// since it is slower and has no significant benefits in precision.
 
-	// There is no need in handling NaNs here, since they must be cleanup up
+	// There is no need in handling NaNs here, since they must be cleaned up
 	// before calling rollup funcs.
 	values := rfa.values
 	if len(values) == 0 {
-		return nan
+		return rfa.prevValue
 	}
 	var sum float64
 	for _, v := range values {
@@ -422,11 +457,11 @@ func rollupAvg(rfa *rollupFuncArg) float64 {
 }
 
 func rollupMin(rfa *rollupFuncArg) float64 {
-	// There is no need in handling NaNs here, since they must be cleanup up
+	// There is no need in handling NaNs here, since they must be cleaned up
 	// before calling rollup funcs.
 	values := rfa.values
 	if len(values) == 0 {
-		return nan
+		return rfa.prevValue
 	}
 	minValue := values[0]
 	for _, v := range values {
@@ -438,11 +473,11 @@ func rollupMin(rfa *rollupFuncArg) float64 {
 }
 
 func rollupMax(rfa *rollupFuncArg) float64 {
-	// There is no need in handling NaNs here, since they must be cleanup up
+	// There is no need in handling NaNs here, since they must be cleaned up
 	// before calling rollup funcs.
 	values := rfa.values
 	if len(values) == 0 {
-		return nan
+		return rfa.prevValue
 	}
 	maxValue := values[0]
 	for _, v := range values {
@@ -454,11 +489,11 @@ func rollupMax(rfa *rollupFuncArg) float64 {
 }
 
 func rollupSum(rfa *rollupFuncArg) float64 {
-	// There is no need in handling NaNs here, since they must be cleanup up
+	// There is no need in handling NaNs here, since they must be cleaned up
 	// before calling rollup funcs.
 	values := rfa.values
 	if len(values) == 0 {
-		return nan
+		return rfa.prevValue
 	}
 	var sum float64
 	for _, v := range values {
@@ -467,12 +502,43 @@ func rollupSum(rfa *rollupFuncArg) float64 {
 	return sum
 }
 
-func rollupCount(rfa *rollupFuncArg) float64 {
-	// There is no need in handling NaNs here, since they must be cleanup up
+func rollupSum2(rfa *rollupFuncArg) float64 {
+	// There is no need in handling NaNs here, since they must be cleaned up
 	// before calling rollup funcs.
 	values := rfa.values
 	if len(values) == 0 {
-		return nan
+		return rfa.prevValue * rfa.prevValue
+	}
+	var sum2 float64
+	for _, v := range values {
+		sum2 += v * v
+	}
+	return sum2
+}
+
+func rollupGeomean(rfa *rollupFuncArg) float64 {
+	// There is no need in handling NaNs here, since they must be cleaned up
+	// before calling rollup funcs.
+	values := rfa.values
+	if len(values) == 0 {
+		return rfa.prevValue
+	}
+	p := 1.0
+	for _, v := range values {
+		p *= v
+	}
+	return math.Pow(p, 1/float64(len(values)))
+}
+
+func rollupCount(rfa *rollupFuncArg) float64 {
+	// There is no need in handling NaNs here, since they must be cleaned up
+	// before calling rollup funcs.
+	values := rfa.values
+	if len(values) == 0 {
+		if math.IsNaN(rfa.prevValue) {
+			return nan
+		}
+		return 0
 	}
 	return float64(len(values))
 }
@@ -485,11 +551,18 @@ func rollupStddev(rfa *rollupFuncArg) float64 {
 func rollupStdvar(rfa *rollupFuncArg) float64 {
 	// See `Rapid calculation methods` at https://en.wikipedia.org/wiki/Standard_deviation
 
-	// There is no need in handling NaNs here, since they must be cleanup up
+	// There is no need in handling NaNs here, since they must be cleaned up
 	// before calling rollup funcs.
 	values := rfa.values
 	if len(values) == 0 {
-		return nan
+		if math.IsNaN(rfa.prevValue) {
+			return nan
+		}
+		return 0
+	}
+	if len(values) == 1 {
+		// Fast path.
+		return values[0]
 	}
 	var avg float64
 	var count float64
@@ -504,7 +577,7 @@ func rollupStdvar(rfa *rollupFuncArg) float64 {
 }
 
 func rollupDelta(rfa *rollupFuncArg) float64 {
-	// There is no need in handling NaNs here, since they must be cleanup up
+	// There is no need in handling NaNs here, since they must be cleaned up
 	// before calling rollup funcs.
 	values := rfa.values
 	prevValue := rfa.prevValue
@@ -516,32 +589,42 @@ func rollupDelta(rfa *rollupFuncArg) float64 {
 		values = values[1:]
 	}
 	if len(values) == 0 {
-		return nan
+		return 0
 	}
 	return values[len(values)-1] - prevValue
 }
 
 func rollupIdelta(rfa *rollupFuncArg) float64 {
-	// There is no need in handling NaNs here, since they must be cleanup up
+	// There is no need in handling NaNs here, since they must be cleaned up
 	// before calling rollup funcs.
 	values := rfa.values
 	if len(values) == 0 {
-		return nan
+		if math.IsNaN(rfa.prevValue) {
+			return nan
+		}
+		return 0
 	}
 	lastValue := values[len(values)-1]
 	values = values[:len(values)-1]
 	if len(values) == 0 {
 		prevValue := rfa.prevValue
 		if math.IsNaN(prevValue) {
-			return nan
+			return 0
 		}
 		return lastValue - prevValue
 	}
 	return lastValue - values[len(values)-1]
 }
 
-func rollupDeriv(rfa *rollupFuncArg) float64 {
-	// There is no need in handling NaNs here, since they must be cleanup up
+func rollupDerivSlow(rfa *rollupFuncArg) float64 {
+	// Use linear regression like Prometheus does.
+	// See https://github.com/VictoriaMetrics/VictoriaMetrics/issues/73
+	_, k := linearRegression(rfa)
+	return k
+}
+
+func rollupDerivFast(rfa *rollupFuncArg) float64 {
+	// There is no need in handling NaNs here, since they must be cleaned up
 	// before calling rollup funcs.
 	values := rfa.values
 	timestamps := rfa.timestamps
@@ -557,7 +640,7 @@ func rollupDeriv(rfa *rollupFuncArg) float64 {
 		timestamps = timestamps[1:]
 	}
 	if len(values) == 0 {
-		return nan
+		return 0
 	}
 	vEnd := values[len(values)-1]
 	tEnd := timestamps[len(timestamps)-1]
@@ -567,12 +650,15 @@ func rollupDeriv(rfa *rollupFuncArg) float64 {
 }
 
 func rollupIderiv(rfa *rollupFuncArg) float64 {
-	// There is no need in handling NaNs here, since they must be cleanup up
+	// There is no need in handling NaNs here, since they must be cleaned up
 	// before calling rollup funcs.
 	values := rfa.values
 	timestamps := rfa.timestamps
 	if len(values) == 0 {
-		return nan
+		if math.IsNaN(rfa.prevValue) {
+			return nan
+		}
+		return 0
 	}
 	vEnd := values[len(values)-1]
 	tEnd := timestamps[len(timestamps)-1]
@@ -582,7 +668,7 @@ func rollupIderiv(rfa *rollupFuncArg) float64 {
 	prevTimestamp := rfa.prevTimestamp
 	if len(values) == 0 {
 		if math.IsNaN(prevValue) {
-			return nan
+			return 0
 		}
 	} else {
 		prevValue = values[len(values)-1]
@@ -594,16 +680,18 @@ func rollupIderiv(rfa *rollupFuncArg) float64 {
 }
 
 func rollupChanges(rfa *rollupFuncArg) float64 {
-	// There is no need in handling NaNs here, since they must be cleanup up
+	// There is no need in handling NaNs here, since they must be cleaned up
 	// before calling rollup funcs.
 	values := rfa.values
-	if len(values) == 0 {
-		return nan
-	}
-	n := 0
 	prevValue := rfa.prevValue
+	n := 0
 	if math.IsNaN(prevValue) {
+		if len(values) == 0 {
+			return nan
+		}
 		prevValue = values[0]
+		values = values[1:]
+		n++
 	}
 	for _, v := range values {
 		if v != prevValue {
@@ -615,11 +703,14 @@ func rollupChanges(rfa *rollupFuncArg) float64 {
 }
 
 func rollupResets(rfa *rollupFuncArg) float64 {
-	// There is no need in handling NaNs here, since they must be cleanup up
+	// There is no need in handling NaNs here, since they must be cleaned up
 	// before calling rollup funcs.
 	values := rfa.values
 	if len(values) == 0 {
-		return nan
+		if math.IsNaN(rfa.prevValue) {
+			return nan
+		}
+		return 0
 	}
 	prevValue := rfa.prevValue
 	if math.IsNaN(prevValue) {
@@ -627,7 +718,7 @@ func rollupResets(rfa *rollupFuncArg) float64 {
 		values = values[1:]
 	}
 	if len(values) == 0 {
-		return nan
+		return 0
 	}
 	n := 0
 	for _, v := range values {
@@ -646,7 +737,7 @@ func rollupFirst(rfa *rollupFuncArg) float64 {
 		return v
 	}
 
-	// There is no need in handling NaNs here, since they must be cleanup up
+	// There is no need in handling NaNs here, since they must be cleaned up
 	// before calling rollup funcs.
 	values := rfa.values
 	if len(values) == 0 {
@@ -655,24 +746,27 @@ func rollupFirst(rfa *rollupFuncArg) float64 {
 	return values[0]
 }
 
-var rollupDefault = rollupFirst
+var rollupDefault = rollupLast
 
 func rollupLast(rfa *rollupFuncArg) float64 {
-	// There is no need in handling NaNs here, since they must be cleanup up
+	// There is no need in handling NaNs here, since they must be cleaned up
 	// before calling rollup funcs.
 	values := rfa.values
 	if len(values) == 0 {
-		return nan
+		return rfa.prevValue
 	}
 	return values[len(values)-1]
 }
 
 func rollupDistinct(rfa *rollupFuncArg) float64 {
-	// There is no need in handling NaNs here, since they must be cleanup up
+	// There is no need in handling NaNs here, since they must be cleaned up
 	// before calling rollup funcs.
 	values := rfa.values
 	if len(values) == 0 {
-		return nan
+		if math.IsNaN(rfa.prevValue) {
+			return nan
+		}
+		return 0
 	}
 	m := make(map[float64]struct{})
 	for _, v := range values {
@@ -684,12 +778,15 @@ func rollupDistinct(rfa *rollupFuncArg) float64 {
 func rollupIntegrate(rfa *rollupFuncArg) float64 {
 	prevTimestamp := rfa.prevTimestamp
 
-	// There is no need in handling NaNs here, since they must be cleanup up
+	// There is no need in handling NaNs here, since they must be cleaned up
 	// before calling rollup funcs.
 	values := rfa.values
 	timestamps := rfa.timestamps
 	if len(values) == 0 {
-		return nan
+		if math.IsNaN(rfa.prevValue) {
+			return nan
+		}
+		return 0
 	}
 	prevValue := rfa.prevValue
 	if math.IsNaN(prevValue) {
@@ -699,7 +796,7 @@ func rollupIntegrate(rfa *rollupFuncArg) float64 {
 		timestamps = timestamps[1:]
 	}
 	if len(values) == 0 {
-		return nan
+		return 0
 	}
 
 	var sum float64
