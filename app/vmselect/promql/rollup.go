@@ -33,6 +33,8 @@ var rollupFuncs = map[string]newRollupFunc{
 	"max_over_time":             newRollupFuncOneArg(rollupMax),
 	"sum_over_time":             newRollupFuncOneArg(rollupSum),
 	"sum_over_time_keep_name":   newRollupFuncOneArg(rollupSum),
+	"sum3_over_time":            newRollupFuncOneArg(rollupSum3),
+	"sum3_over_time_keep_name":  newRollupFuncOneArg(rollupSum3),
 	"count_over_time":           newRollupFuncOneArg(rollupCount),
 	"count_over_time_keep_name": newRollupFuncOneArg(rollupCount),
 	"quantile_over_time":        newRollupQuantile,
@@ -75,6 +77,7 @@ var rollupFuncsKeepMetricGroup = map[string]bool{
 	"min_over_time":             true,
 	"max_over_time":             true,
 	"sum_over_time_keep_name":   true,
+	"sum2_over_time_keep_name":  true,
 	"count_over_time_keep_name": true,
 	"quantile_over_time":        true,
 	"rollup":                    true,
@@ -518,6 +521,20 @@ func rollupSum2(rfa *rollupFuncArg) float64 {
 		sum2 += v * v
 	}
 	return sum2
+}
+
+func rollupSum3(rfa *rollupFuncArg) float64 {
+	// There is no need in handling NaNs here, since they must be cleaned up
+	// before calling rollup funcs.
+	values := rfa.values
+	if len(values) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, v := range values {
+		sum += v
+	}
+	return sum
 }
 
 func rollupGeomean(rfa *rollupFuncArg) float64 {
