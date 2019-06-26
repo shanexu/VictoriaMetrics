@@ -77,7 +77,7 @@ var rollupFuncsKeepMetricGroup = map[string]bool{
 	"min_over_time":             true,
 	"max_over_time":             true,
 	"sum_over_time_keep_name":   true,
-	"sum2_over_time_keep_name":  true,
+	"sum3_over_time_keep_name":  true,
 	"count_over_time_keep_name": true,
 	"quantile_over_time":        true,
 	"rollup":                    true,
