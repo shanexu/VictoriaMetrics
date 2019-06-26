@@ -17,25 +17,27 @@ var rollupFuncs = map[string]newRollupFunc{
 
 	// Standard rollup funcs from PromQL.
 	// See funcs accepting range-vector on https://prometheus.io/docs/prometheus/latest/querying/functions/ .
-	"changes":            newRollupFuncOneArg(rollupChanges),
-	"delta":              newRollupFuncOneArg(rollupDelta),
-	"deriv":              newRollupFuncOneArg(rollupDerivSlow),
-	"deriv_fast":         newRollupFuncOneArg(rollupDerivFast),
-	"holt_winters":       newRollupHoltWinters,
-	"idelta":             newRollupFuncOneArg(rollupIdelta),
-	"increase":           newRollupFuncOneArg(rollupDelta),  // + rollupFuncsRemoveCounterResets
-	"irate":              newRollupFuncOneArg(rollupIderiv), // + rollupFuncsRemoveCounterResets
-	"predict_linear":     newRollupPredictLinear,
-	"rate":               newRollupFuncOneArg(rollupDerivFast), // + rollupFuncsRemoveCounterResets
-	"resets":             newRollupFuncOneArg(rollupResets),
-	"avg_over_time":      newRollupFuncOneArg(rollupAvg),
-	"min_over_time":      newRollupFuncOneArg(rollupMin),
-	"max_over_time":      newRollupFuncOneArg(rollupMax),
-	"sum_over_time":      newRollupFuncOneArg(rollupSum),
-	"count_over_time":    newRollupFuncOneArg(rollupCount),
-	"quantile_over_time": newRollupQuantile,
-	"stddev_over_time":   newRollupFuncOneArg(rollupStddev),
-	"stdvar_over_time":   newRollupFuncOneArg(rollupStdvar),
+	"changes":                   newRollupFuncOneArg(rollupChanges),
+	"delta":                     newRollupFuncOneArg(rollupDelta),
+	"deriv":                     newRollupFuncOneArg(rollupDerivSlow),
+	"deriv_fast":                newRollupFuncOneArg(rollupDerivFast),
+	"holt_winters":              newRollupHoltWinters,
+	"idelta":                    newRollupFuncOneArg(rollupIdelta),
+	"increase":                  newRollupFuncOneArg(rollupDelta),  // + rollupFuncsRemoveCounterResets
+	"irate":                     newRollupFuncOneArg(rollupIderiv), // + rollupFuncsRemoveCounterResets
+	"predict_linear":            newRollupPredictLinear,
+	"rate":                      newRollupFuncOneArg(rollupDerivFast), // + rollupFuncsRemoveCounterResets
+	"resets":                    newRollupFuncOneArg(rollupResets),
+	"avg_over_time":             newRollupFuncOneArg(rollupAvg),
+	"min_over_time":             newRollupFuncOneArg(rollupMin),
+	"max_over_time":             newRollupFuncOneArg(rollupMax),
+	"sum_over_time":             newRollupFuncOneArg(rollupSum),
+	"sum_over_time_keep_name":   newRollupFuncOneArg(rollupSum),
+	"count_over_time":           newRollupFuncOneArg(rollupCount),
+	"count_over_time_keep_name": newRollupFuncOneArg(rollupCount),
+	"quantile_over_time":        newRollupQuantile,
+	"stddev_over_time":          newRollupFuncOneArg(rollupStddev),
+	"stdvar_over_time":          newRollupFuncOneArg(rollupStdvar),
 
 	// Additional rollup funcs.
 	"sum2_over_time":     newRollupFuncOneArg(rollupSum2),
@@ -68,13 +70,15 @@ var rollupFuncsRemoveCounterResets = map[string]bool{
 }
 
 var rollupFuncsKeepMetricGroup = map[string]bool{
-	"default_rollup":     true,
-	"avg_over_time":      true,
-	"min_over_time":      true,
-	"max_over_time":      true,
-	"quantile_over_time": true,
-	"rollup":             true,
-	"geomean_over_time":  true,
+	"default_rollup":            true,
+	"avg_over_time":             true,
+	"min_over_time":             true,
+	"max_over_time":             true,
+	"sum_over_time_keep_name":   true,
+	"count_over_time_keep_name": true,
+	"quantile_over_time":        true,
+	"rollup":                    true,
+	"geomean_over_time":         true,
 }
 
 func getRollupArgIdx(funcName string) int {
