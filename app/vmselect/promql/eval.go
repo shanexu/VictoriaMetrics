@@ -72,6 +72,8 @@ type EvalConfig struct {
 
 	MayCache bool
 
+	DenyPartialResponse bool
+
 	timestamps     []int64
 	timestampsOnce sync.Once
 }
@@ -85,6 +87,7 @@ func newEvalConfig(src *EvalConfig) *EvalConfig {
 	ec.Step = src.Step
 	ec.Deadline = src.Deadline
 	ec.MayCache = src.MayCache
+	ec.DenyPartialResponse = src.DenyPartialResponse
 
 	// do not copy src.timestamps - they must be generated again.
 	return &ec
@@ -409,6 +412,7 @@ func evalRollupFuncWithSubquery(ec *EvalConfig, name string, rf rollupFunc, re *
 			ts.Values = rc.Do(ts.Values[:0], values, timestamps)
 			ts.Timestamps = sharedTimestamps
 			ts.denyReuse = true
+
 			tssLock.Lock()
 			tss = append(tss, &ts)
 			tssLock.Unlock()
@@ -503,9 +507,12 @@ func evalRollupFuncWithMetricExpr(ec *EvalConfig, name string, rf rollupFunc, me
 		TagFilterss:  [][]storage.TagFilter{me.TagFilters},
 	}
 
-	rss, denyCache, err := netstorage.ProcessSearchQuery(ec.AuthToken, sq, ec.Deadline)
+	rss, isPartial, err := netstorage.ProcessSearchQuery(ec.AuthToken, sq, ec.Deadline)
 	if err != nil {
 		return nil, err
+	}
+	if isPartial && ec.DenyPartialResponse {
+		return nil, fmt.Errorf("cannot return full response, since some of vmstorage nodes are unavailable")
 	}
 	rssLen := rss.Len()
 	if rssLen == 0 {
@@ -564,7 +571,7 @@ func evalRollupFuncWithMetricExpr(ec *EvalConfig, name string, rf rollupFunc, me
 		}
 	}
 	tss = mergeTimeseries(tssCached, tss, start, ec)
-	if !denyCache {
+	if !isPartial {
 		rollupResultCacheV.Put(name, ec, me, window, tss)
 	}
 	return tss, nil
@@ -625,6 +632,11 @@ func getRollupConfigs(name string, rf rollupFunc, start, end, step, window int64
 			deltaValues(values)
 		}
 		rcs = appendRollupConfigs(rcs)
+	case "rollup_candlestick":
+		rcs = append(rcs, newRollupConfig(rollupFirst, "open"))
+		rcs = append(rcs, newRollupConfig(rollupLast, "close"))
+		rcs = append(rcs, newRollupConfig(rollupMin, "low"))
+		rcs = append(rcs, newRollupConfig(rollupMax, "high"))
 	default:
 		rcs = append(rcs, newRollupConfig(rf, ""))
 	}

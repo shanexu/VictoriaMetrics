@@ -1,10 +1,10 @@
-<img  text-align="center" alt="Victoria Metrics" src="logo.png">
+<img alt="Victoria Metrics" src="logo.png">
 
 # Cluster version of VictoriaMetrics
 
 VictoriaMetrics is fast, cost-effective and scalable time series database. It can be used as a long-term remote storage for Prometheus.
 
-We'd recommend using [single-node version](https://github.com/VictoriaMetrics/VictoriaMetrics) instead of cluster version
+It is recommended using [single-node version](https://github.com/VictoriaMetrics/VictoriaMetrics) instead of cluster version
 for ingestion rates lower than 10 million of data points per second.
 Single-node version [scales perfectly](https://medium.com/@valyala/measuring-vertical-scalability-for-time-series-databases-in-google-cloud-92550d78d8ae)
 with the number of CPU cores, RAM and available storage space.
@@ -27,6 +27,8 @@ VictoriaMetrics cluster consists of the following services:
 - `vmselect` - performs incoming queries using the data from `vmstorage`
 
 Each service may scale independently and may run on the most suitable hardware.
+
+<img src="https://docs.google.com/drawings/d/e/2PACX-1vTvk2raU9kFgZ84oF-OKolrGwHaePhHRsZEcfQ1I_EC5AB_XPWwB392XshxPramLJ8E4bqptTnFn5LL/pub?w=1104&amp;h=746">
 
 
 ## Building from sources
@@ -160,27 +162,30 @@ the update process. See [cluster availability](#cluster-availability) section fo
 
 ### Helm
 
-* Helm chart is available in the `deployment/k8s/helm/victoria-metrics` folder.
+Helm chart simplifies managing cluster version of VictoriaMetrics in Kubernetes.
+It is available in the `deployment/k8s/helm/victoria-metrics` folder.
 
 1. Install Cluster: `helm install -n <NAME> deployment/k8s/helm/victoria-mertrics` or `ENV=<NAME> make helm-install`.
 2. Upgrade Cluster: `helm upgrade <NAME> deployment/k8s/helm/victoria-mertrics` or `ENV=<NAME> make helm-upgrade`.
 3. Delete Cluster: `helm del --purge <NAME>` or `ENV=<NAME> make helm-delete`.
 
-* Upgrade follows `Cluster resizing procedure` under the hood.
+Upgrade follows `Cluster resizing procedure` under the hood.
 
 
 ### Replication and data safety
 
 VictoriaMetrics offloads replication to the underlying storage pointed by `-storageDataPath`.
-We recommend storing data on [Google Compute Engine persistent disks](https://cloud.google.com/compute/docs/disks/#pdspecs),
+It is recommended storing data on [Google Compute Engine persistent disks](https://cloud.google.com/compute/docs/disks/#pdspecs),
 since they are protected from data loss and data corruption. They also provide consistently high performance
 and [may be resized](https://cloud.google.com/compute/docs/disks/add-persistent-disk) without downtime.
 HDD-based persistent disks should be enough for the majority of use cases.
 
+It is recommended using durable replicated persistent volumes in Kubernetes.
+
 
 ### Backups
 
-We'd recommend performing periodical backups from [instant snapshots](https://medium.com/@valyala/how-victoriametrics-makes-instant-snapshots-for-multi-terabyte-time-series-data-e1f3fb0e0282)
+It is recommended performing periodical backups from [instant snapshots](https://medium.com/@valyala/how-victoriametrics-makes-instant-snapshots-for-multi-terabyte-time-series-data-e1f3fb0e0282)
 for protecting from user errors such as accidental data deletion.
 
 The following steps must be performed for each `vmstorage` node for creating a backup:
@@ -216,7 +221,7 @@ Adhering `KISS` principle simplifies the resulting code and architecture, so it 
 
 Due to `KISS` cluster version of VictoriaMetrics has no the following "features" popular in distributed computing world:
 
-- Fragile [gossip protocols](https://en.wikipedia.org/wiki/Gossip_protocol).
+- Fragile gossip protocols. See [failed attempt in Thanos](https://github.com/improbable-eng/thanos/blob/030bc345c12c446962225221795f4973848caab5/docs/proposals/completed/201809_gossip-removal.md).
 - Hard-to-understand-and-implement-properly [Paxos protocols](https://www.quora.com/In-distributed-systems-what-is-a-simple-explanation-of-the-Paxos-algorithm).
 - Complex replication schemes, which may go nuts in unforesseen edge cases. The replication is offloaded to the underlying durable replicated storage
   such as [persistent disks in Google Compute Engine](https://cloud.google.com/compute/docs/disks/#pdspecs).
