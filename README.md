@@ -4,7 +4,7 @@
 [![Build Status](https://travis-ci.org/VictoriaMetrics/VictoriaMetrics.svg?branch=master)](https://travis-ci.org/VictoriaMetrics/VictoriaMetrics)
 [![codecov](https://codecov.io/gh/VictoriaMetrics/VictoriaMetrics/branch/master/graph/badge.svg)](https://codecov.io/gh/VictoriaMetrics/VictoriaMetrics)
 
-<img text-align="center" alt="Victoria Metrics" src="logo.png">
+<img alt="Victoria Metrics" src="logo.png">
 
 ## Single-node VictoriaMetrics
 
@@ -20,6 +20,7 @@ Cluster version is available [here](https://github.com/VictoriaMetrics/VictoriaM
 
 * Supports [Prometheus querying API](https://prometheus.io/docs/prometheus/latest/querying/api/), so it can be used as Prometheus drop-in replacement in Grafana.
   Additionally, VictoriaMetrics extends PromQL with opt-in [useful features](https://github.com/VictoriaMetrics/VictoriaMetrics/wiki/ExtendedPromQL).
+* Global query view. Multiple Prometheus instances may write data into VictoriaMetrics. Later this data may be used in a single query.
 * High performance and good scalability for both [inserts](https://medium.com/@valyala/high-cardinality-tsdb-benchmarks-victoriametrics-vs-timescaledb-vs-influxdb-13e6ee64dd6b)
   and [selects](https://medium.com/@valyala/when-size-matters-benchmarking-victoriametrics-vs-timescale-and-influxdb-6035811952d4).
   [Outperforms InfluxDB and TimescaleDB by up to 20x](https://medium.com/@valyala/measuring-vertical-scalability-for-time-series-databases-in-google-cloud-92550d78d8ae).
@@ -28,7 +29,8 @@ Cluster version is available [here](https://github.com/VictoriaMetrics/VictoriaM
   may be crammed into a limited storage comparing to TimescaleDB.
 * Optimized for storage with high-latency IO and low iops (HDD and network storage in AWS, Google Cloud, Microsoft Azure, etc). See [graphs from these benchmarks](https://medium.com/@valyala/high-cardinality-tsdb-benchmarks-victoriametrics-vs-timescaledb-vs-influxdb-13e6ee64dd6b).
 * A single-node VictoriaMetrics may substitute moderately sized clusters built with competing solutions such as Thanos, Uber M3, Cortex, InfluxDB or TimescaleDB.
-  See [vertical scalability benchmarks](https://medium.com/@valyala/measuring-vertical-scalability-for-time-series-databases-in-google-cloud-92550d78d8ae).
+  See [vertical scalability benchmarks](https://medium.com/@valyala/measuring-vertical-scalability-for-time-series-databases-in-google-cloud-92550d78d8ae)
+  and [comparing Thanos to VictoriaMetrics cluster](https://medium.com/@valyala/comparing-thanos-to-victoriametrics-cluster-b193bea1683).
 * Easy operation:
   * VictoriaMetrics consists of a single executable without external dependencies.
   * All the configuration is done via explicit command-line flags with reasonable defaults.
@@ -59,10 +61,11 @@ Cluster version is available [here](https://github.com/VictoriaMetrics/VictoriaM
   - [Third-party contributions](#third-party-contributions)
   - [Prometheus setup](#prometheus-setup)
   - [Grafana setup](#grafana-setup)
+  - [How to upgrade VictoriaMetrics?](#how-to-upgrade-victoriametrics)
+  - [How to apply new config to VictoriaMetrics?](#how-to-apply-new-config-to-victoriametrics)
   - [How to send data from InfluxDB-compatible agents such as Telegraf?](#how-to-send-data-from-influxdb-compatible-agents-such-as-telegraf)
   - [How to send data from Graphite-compatible agents such as StatsD?](#how-to-send-data-from-graphite-compatible-agents-such-as-statsd)
   - [How to send data from OpenTSDB-compatible agents?](#how-to-send-data-from-opentsdb-compatible-agents)
-  - [How to apply new config / upgrade VictoriaMetrics?](#how-to-apply-new-config--upgrade-victoriametrics)
   - [How to work with snapshots?](#how-to-work-with-snapshots)
   - [How to delete time series?](#how-to-delete-time-series)
   - [How to export time series?](#how-to-export-time-series)
@@ -176,6 +179,10 @@ The label name may be arbitrary - `datacenter` is just an example. The label val
 across Prometheus instances, so time series may be filtered and grouped by this label.
 
 
+It is recommended upgrading Prometheus to [v2.10.0](https://github.com/prometheus/prometheus/releases) or newer,
+since the previous versions may have issues with `remote_write`.
+
+
 ### Grafana setup
 
 Create [Prometheus datasource](http://docs.grafana.org/features/datasources/prometheus/) in Grafana with the following Url:
@@ -188,6 +195,28 @@ Substitute `<victoriametrics-addr>` with the hostname or IP address of VictoriaM
 
 Then build graphs with the created datasource using [Prometheus query language](https://prometheus.io/docs/prometheus/latest/querying/basics/).
 VictoriaMetrics supports native PromQL and [extends it with useful features](ExtendedPromQL).
+
+
+### How to upgrade VictoriaMetrics?
+
+It is safe upgrading VictoriaMetrics to new versions unless [release notes](https://github.com/VictoriaMetrics/VictoriaMetrics/releases)
+say otherwise. It is recommended performing regular upgrades to the latest version,
+since it may contain important bug fixes, performance optimizations or new features.
+
+Follow the following steps during the upgrade:
+
+1) Send `SIGINT` signal to VictoriaMetrics process in order to gracefully stop it.
+2) Wait until the process stops. This can take a few seconds.
+3) Start the upgraded VictoriaMetrics.
+
+
+### How to apply new config to VictoriaMetrics?
+
+VictoriaMetrics must be restarted for applying new config:
+
+1) Send `SIGINT` signal to VictoriaMetrics process in order to gracefully stop it.
+2) Wait until the process stops. This can take a few seconds.
+3) Start VictoriaMetrics with new config.
 
 
 ### How to send data from InfluxDB-compatible agents such as [Telegraf](https://www.influxdata.com/time-series-platform/telegraf/)?
@@ -204,7 +233,9 @@ Do not forget substituting `<victoriametrics-addr>` with the real address where 
 
 VictoriaMetrics maps Influx data using the following rules:
 * [`db` query arg](https://docs.influxdata.com/influxdb/v1.7/tools/api/#write-http-endpoint) is mapped into `db` label value.
-* Field names are mapped to time series names prefixed with `{measurement}{separator}` value. `{separator}` equals to `.` by default, but can be changed with `-influxMeasurementFieldSeparator` command-line flag.
+* Field names are mapped to time series names prefixed with `{measurement}{separator}` value,
+  where `{separator}` equals to `_` by default. It can be changed with `-influxMeasurementFieldSeparator` command-line flag.
+  See also `-influxSkipSingleField` command-line flag.
 * Field values are mapped to time series values.
 * Tags are mapped to Prometheus labels as-is.
 
@@ -221,7 +252,8 @@ foo.field1{tag1="value1", tag2="value2"} 12
 foo.field2{tag1="value1", tag2="value2"} 40
 ```
 
-Example for writing data with Influx line protocol to local VictoriaMetrics using `curl`:
+Example for writing data with [Influx line protocol](https://docs.influxdata.com/influxdb/v1.7/write_protocols/line_protocol_tutorial/)
+to local VictoriaMetrics using `curl`:
 
 ```
 curl -d 'measurement,tag1=value1,tag2=value2 field1=123,field2=1.23' -X POST 'http://localhost:8428/write'
@@ -308,15 +340,6 @@ The `/api/v1/export` endpoint should return the following response:
 ```
 
 
-### How to apply new config / upgrade VictoriaMetrics?
-
-VictoriaMetrics must be restarted in order to upgrade or apply new config:
-
-1) Send `SIGINT` signal to VictoriaMetrics process in order to gracefully stop it.
-2) Wait until the process stops. This can take a few seconds.
-3) Start the upgraded VictoriaMetrics with new config.
-
-
 ### How to work with snapshots?
 
 VictoriaMetrics is able to create [instant snapshots](https://medium.com/@valyala/how-victoriametrics-makes-instant-snapshots-for-multi-terabyte-time-series-data-e1f3fb0e0282)
@@ -388,19 +411,26 @@ Rough estimation of the required resources:
 
 * RAM size: less than 1KB per active time series. So, ~1GB of RAM is required for 1M active time series.
   Time series is considered active if new data points have been added to it recently or if it has been recently queried.
-  VictoriaMetrics stores various caches in RAM. Memory size for these caches may be limited with `-memory.allowedPercent` flag.
+  The number of active time series may be obtained from `vm_cache_entries{type="storage/hour_metric_ids"}` metric
+  exproted on the `/metrics` page.
+  VictoriaMetrics stores various caches in RAM. Memory size for these caches may be limited by `-memory.allowedPercent` flag.
+
 * CPU cores: a CPU core per 300K inserted data points per second. So, ~4 CPU cores are required for processing
-  the insert stream of 1M data points per second.
+  the insert stream of 1M data points per second. The ingestion rate may be lower for high cardinality data.
+  See [this article](https://medium.com/@valyala/insert-benchmarks-with-inch-influxdb-vs-victoriametrics-e31a41ae2893) for details.
   If you see lower numbers per CPU core, then it is likely active time series info doesn't fit caches,
   so you need more RAM for lowering CPU usage.
+
 * Storage size: less than a byte per data point on average. So, ~260GB is required for storing a month-long insert stream
   of 100K data points per second.
   The actual storage size heavily depends on data randomness (entropy). Higher randomness means higher storage size requirements.
+  Read [this article](https://medium.com/faun/victoriametrics-achieving-better-compression-for-time-series-data-than-gorilla-317bc1f95932)
+  for details.
 
 
 ### High availability
 
-1) Install multiple VictoriaMetrics instances in distinct datacenters.
+1) Install multiple VictoriaMetrics instances in distinct datacenters (availability zones).
 2) Add addresses of these instances to `remote_write` section in Prometheus config:
 
 ```yml
@@ -423,6 +453,10 @@ kill -HUP `pidof prometheus`
 4) Now Prometheus should write data into all the configured `remote_write` urls in parallel.
 5) Set up [Promxy](https://github.com/jacksontj/promxy) in front of all the VictoriaMetrics replicas.
 6) Set up Prometheus datasource in Grafana that points to Promxy.
+
+
+If you have Prometheus HA pairs with replicas `r1` and `r2` in each pair, then configure each `r1`
+to write data to `<victoriametrics-addr-1`, while each `r2` should write data to `victoriametrics-addr-2`.
 
 
 ### Multiple retentions
@@ -455,7 +489,7 @@ Single-node VictoriaMetrics doesn't support multi-tenancy. Use [cluster version]
 
 Though single-node VictoriaMetrics cannot scale to multiple nodes, it is optimized for resource usage - storage size / bandwidth / IOPS, RAM, CPU.
 This means that a single-node VictoriaMetrics may scale vertically and substitute moderately sized cluster built with competing solutions
-such as Thanos, Uber M3, InfluxDB or TimescaleDB.
+such as Thanos, Uber M3, InfluxDB or TimescaleDB. See [vertical scalability benchmarks](https://medium.com/@valyala/measuring-vertical-scalability-for-time-series-databases-in-google-cloud-92550d78d8ae).
 
 So try single-node VictoriaMetrics at first and then [switch to cluster version](https://github.com/VictoriaMetrics/VictoriaMetrics/tree/cluster) if you still need
 horizontally scalable long-term remote storage for really large Prometheus deployments.
@@ -492,6 +526,21 @@ VictoriaMetrics exports internal metrics in Prometheus format on the `/metrics` 
 Add this page to Prometheus' scrape config in order to collect VictoriaMetrics metrics.
 There is [an official Grafana dashboard for single-node VictoriaMetrics](https://grafana.com/dashboards/10229).
 
+The most interesting metrics are:
+
+* `vm_cache_entries{type="storage/hour_metric_ids"}` - the number of time series with new data points during the last hour
+  aka active time series.
+* `vm_rows{type="indexdb"}` - the number of rows in inverted index. Each label in each unique time series adds a single
+  row into the inverted index. An approximate number of time series in the database may be calculated as
+  `vm_rows{type="indexdb"} / (avg_labels_per_series + 1)`, where `avg_labels_per_series` is the average number of labels
+  per each time series.
+* Sum of `vm_rows{type="storage/big"}` and `vm_rows{type="storage/small"}` - total number of `(timestamp, value)` data points
+  in the database.
+* Sum of all the `vm_cache_size_bytes` metrics - the total size of all the caches in the database.
+* `vm_allowed_memory_bytes` - the maximum allowed size for caches in the database. It is calculated as `system_memory * <-memory.allowedPercent> / 100`,
+  where `system_memory` is the amount of system memory and `-memory.allowedPercent` is the corresponding flag value.
+* `vm_rows_inserted_total` - the total number of inserted rows since VictoriaMetrics start.
+
 
 ### Troubleshooting
 
@@ -517,9 +566,17 @@ Contact us with any questions regarding VictoriaMetrics at [info@victoriametrics
 
 Feel free asking any questions regarding VictoriaMetrics:
 
+- [slack](http://slack.victoriametrics.com/)
 - [telergam-en](https://t.me/VictoriaMetrics_en)
 - [telergam-ru](https://t.me/VictoriaMetrics_ru1)
 - [google groups](https://groups.google.com/forum/#!forum/victorametrics-users)
+
+
+If you like VictoriaMetrics and want contributing, then we need the following:
+
+- Filing issues and feature requests [here](https://github.com/VictoriaMetrics/VictoriaMetrics/issues).
+- Spreading a word about VictoriaMetrics: conference talks, articles, comments, experience sharing with colleagues.
+- Updating documentation.
 
 We are open to third-party pull requests provided they follow [KISS design principle](https://en.wikipedia.org/wiki/KISS_principle):
 

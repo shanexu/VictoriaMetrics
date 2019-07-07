@@ -62,7 +62,7 @@ func TestExecSuccess(t *testing.T) {
 			Deadline: netstorage.NewDeadline(time.Minute),
 		}
 		for i := 0; i < 5; i++ {
-			result, err := Exec(ec, q)
+			result, err := Exec(ec, q, false)
 			if err != nil {
 				t.Fatalf(`unexpected error when executing %q: %s`, q, err)
 			}
@@ -2473,6 +2473,21 @@ func TestExecSuccess(t *testing.T) {
 		resultExpected := []netstorage.Result{r1, r2}
 		f(q, resultExpected)
 	})
+	t.Run(`topk(1, nan_timeseries)`, func(t *testing.T) {
+		t.Parallel()
+		q := `topk(1, label_set(NaN, "foo", "bar") or label_set(time()/150, "baz", "sss")) default 0`
+		r1 := netstorage.Result{
+			MetricName: metricNameExpected,
+			Values:     []float64{6.666666666666667, 8, 9.333333333333334, 10.666666666666666, 12, 13.333333333333334},
+			Timestamps: timestampsExpected,
+		}
+		r1.MetricName.Tags = []storage.Tag{{
+			Key:   []byte("baz"),
+			Value: []byte("sss"),
+		}}
+		resultExpected := []netstorage.Result{r1}
+		f(q, resultExpected)
+	})
 	t.Run(`topk(2)`, func(t *testing.T) {
 		t.Parallel()
 		q := `sort(topk(2, label_set(10, "foo", "bar") or label_set(time()/150, "baz", "sss")))`
@@ -3203,6 +3218,48 @@ func TestExecSuccess(t *testing.T) {
 		resultExpected := []netstorage.Result{r}
 		f(q, resultExpected)
 	})
+	t.Run(`rollup_candlestick()`, func(t *testing.T) {
+		t.Parallel()
+		q := `sort(rollup_candlestick(round(rand(0),0.01)[:10s]))`
+		r1 := netstorage.Result{
+			MetricName: metricNameExpected,
+			Values:     []float64{0.02, 0.02, 0.03, 0, 0.03, 0.02},
+			Timestamps: timestampsExpected,
+		}
+		r1.MetricName.Tags = []storage.Tag{{
+			Key:   []byte("rollup"),
+			Value: []byte("low"),
+		}}
+		r2 := netstorage.Result{
+			MetricName: metricNameExpected,
+			Values:     []float64{0.32, 0.82, 0.13, 0.28, 0.86, 0.57},
+			Timestamps: timestampsExpected,
+		}
+		r2.MetricName.Tags = []storage.Tag{{
+			Key:   []byte("rollup"),
+			Value: []byte("close"),
+		}}
+		r3 := netstorage.Result{
+			MetricName: metricNameExpected,
+			Values:     []float64{0.9, 0.32, 0.82, 0.13, 0.28, 0.86},
+			Timestamps: timestampsExpected,
+		}
+		r3.MetricName.Tags = []storage.Tag{{
+			Key:   []byte("rollup"),
+			Value: []byte("open"),
+		}}
+		r4 := netstorage.Result{
+			MetricName: metricNameExpected,
+			Values:     []float64{0.85, 0.94, 0.97, 0.93, 0.98, 0.92},
+			Timestamps: timestampsExpected,
+		}
+		r4.MetricName.Tags = []storage.Tag{{
+			Key:   []byte("rollup"),
+			Value: []byte("high"),
+		}}
+		resultExpected := []netstorage.Result{r1, r2, r3, r4}
+		f(q, resultExpected)
+	})
 	t.Run(`rollup_increase()`, func(t *testing.T) {
 		t.Parallel()
 		q := `sort(rollup_increase(time()))`
@@ -3623,7 +3680,14 @@ func TestExecError(t *testing.T) {
 			Deadline: netstorage.NewDeadline(time.Minute),
 		}
 		for i := 0; i < 4; i++ {
-			rv, err := Exec(ec, q)
+			rv, err := Exec(ec, q, false)
+			if err == nil {
+				t.Fatalf(`expecting non-nil error on %q`, q)
+			}
+			if rv != nil {
+				t.Fatalf(`expecting nil rv`)
+			}
+			rv, err = Exec(ec, q, true)
 			if err == nil {
 				t.Fatalf(`expecting non-nil error on %q`, q)
 			}
